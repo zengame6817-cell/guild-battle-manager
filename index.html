@@ -3,44 +3,58 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <title>ギルド対戦管理</title>
+  <meta name="theme-color" content="#07111f">
+  <title>ギルド対戦管理 v2</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="app-header">
-    <div class="title-wrap">
-      <h1>ギルド対戦管理</h1>
+    <div class="brand">
+      <div>
+        <p class="eyebrow">GUILD BATTLE CONTROL</p>
+        <h1>ギルド対戦管理</h1>
+      </div>
       <span id="connectionStatus" class="status status-loading">読込中</span>
     </div>
 
-    <div class="header-controls">
-      <label class="field compact">
+    <div class="header-actions">
+      <label class="mini-field">
         <span>モード</span>
         <select id="modeSelect">
           <option value="normal">通常</option>
           <option value="z">Z</option>
         </select>
       </label>
-
-      <button id="refreshButton" class="button secondary" type="button">更新</button>
+      <button id="refreshButton" class="icon-button" type="button" aria-label="更新">↻</button>
     </div>
   </header>
 
   <main class="app-main">
-    <section class="toolbar">
+    <section class="control-grid">
       <div id="guildSelectors" class="guild-selectors"></div>
 
-      <label class="search-box">
-        <span>検索</span>
-        <input id="searchInput" type="search" placeholder="名前で絞り込み">
-      </label>
+      <div class="filter-card">
+        <label>
+          <span>検索</span>
+          <input id="searchInput" type="search" placeholder="味方・相手名を検索">
+        </label>
+        <label>
+          <span>表示</span>
+          <select id="statusFilter">
+            <option value="all">すべて</option>
+            <option value="remaining">未完了のみ</option>
+            <option value="done1">1投済のみ</option>
+            <option value="done2">2投済のみ</option>
+            <option value="unassigned">未配置のみ</option>
+          </select>
+        </label>
+      </div>
     </section>
 
     <section id="summary" class="summary-grid"></section>
 
     <nav class="tabs" aria-label="画面切替">
-      <button class="tab active" data-tab="members" type="button">メンバー</button>
+      <button class="tab active" data-tab="members" type="button">メンバー管理</button>
       <button class="tab" data-tab="battle" type="button">戦力比較</button>
       <button class="tab" data-tab="enemies" type="button">相手配置</button>
     </nav>
