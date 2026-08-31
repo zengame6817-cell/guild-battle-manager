@@ -1,5 +1,5 @@
 window.APP_CONFIG = {
-  VERSION: "2.2.2",
+  VERSION: "2.2.3",
   API_URL: "https://script.google.com/macros/s/AKfycbyC3k5KeD0OqLp9soKwwjkRPBCUOZIfStwPU4QrFYF9FhryqnPs61zVVvTNfT4sXLWPWA/exec",
   VERSION_POLL_MS: 2000,
   FULL_REQUEST_TIMEOUT_MS: 30000,
