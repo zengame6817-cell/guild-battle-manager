@@ -161,3 +161,38 @@ table{width:100%;border-collapse:collapse}.data-table{min-width:1070px}
 .ai-badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:700;color:#2457b7;background:rgba(52,103,222,.12)}
 .remove-row.danger{min-width:40px}
 #discardImportButton{margin-right:8px}
+
+/* v2.2.9: 50枚バッチ解析 */
+.queue-summary{margin:8px 0 10px;font-size:13px;font-weight:700;color:var(--muted)}
+
+/* v2.2.11: 変更セル強調 */
+.field-with-diff{display:flex;flex-direction:column;gap:4px;min-width:0}
+.name-field-wrap{flex:1;min-width:180px}
+.changed-field{
+  background:rgba(255,214,92,.26)!important;
+  box-shadow:0 0 0 2px rgba(229,153,0,.38) inset!important;
+}
+.changed-field-wrap{
+  border-radius:10px;
+  background:rgba(255,214,92,.16);
+}
+.old-value{
+  font-size:11px;
+  line-height:1.2;
+  color:var(--muted);
+  padding-left:3px;
+}
+.diff-badge{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:12px;
+  font-weight:700;
+  color:#8a5a00;
+  background:rgba(255,214,92,.30);
+}
+.import-row.is-new .changed-field{
+  background:rgba(102,187,106,.16)!important;
+  box-shadow:0 0 0 2px rgba(76,175,80,.28) inset!important;
+}

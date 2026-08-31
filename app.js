@@ -30,7 +30,7 @@
     battleControls: $("battleControls"), guilds: $("guildSelectors"), search: $("searchInput"), filter: $("statusFilter"),
     summary: $("summary"), members: $("membersPanel"), battle: $("battlePanel"), enemies: $("enemiesPanel"), importPanel: $("importPanel"),
     importGuild: $("importGuild"), newGuildButton: $("newGuildButton"), guildDataButton: $("guildDataButton"),
-    imageInput: $("imageInput"), imageQueue: $("imageQueue"), analyzeButton: $("analyzeButton"), addManualButton: $("addManualButton"),
+    imageInput: $("imageInput"), imageQueue: $("imageQueue"), imageQueueSummary: $("imageQueueSummary"), analyzeButton: $("analyzeButton"), addManualButton: $("addManualButton"),
     importResults: $("importResults"), importHint: $("importHint"), importActionBar: $("importActionBar"), importCount: $("importCount"),
     importSummaryText: $("importSummaryText"), saveImportButton: $("saveImportButton"), discardImportButton: $("discardImportButton"), toast: $("toast"),
     newGuildDialog: $("newGuildDialog"), newGuildForm: $("newGuildForm"), newGuildName: $("newGuildName"),
@@ -397,10 +397,18 @@
   async function onImagesSelected(e){
     const files=[...e.target.files];
     e.target.value="";
-    for(const file of files){
+    const max=cfg.MAX_BATCH_IMAGES||50;
+    const available=Math.max(0,max-state.importFiles.length);
+    if(files.length>available){
+      showToast(`一度に保持できるスクショは最大${max}枚です。追加できる${available}枚だけ読み込みます。`,true);
+    }
+    for(const file of files.slice(0,available)){
       if(!file.type.startsWith("image/"))continue;
       const prepared=await prepareImage(file);
-      state.importFiles.push({id:cryptoId(),name:file.name,dataUrl:prepared.dataUrl,preview:prepared.preview,status:"待機"});
+      state.importFiles.push({
+        id:cryptoId(),name:file.name,dataUrl:prepared.dataUrl,preview:prepared.preview,
+        status:"待機",attempts:0,rounds:0,lastError:"",nextRetryAt:0
+      });
     }
     renderImageQueue();
   }
@@ -419,27 +427,86 @@
   function loadImage(src){return new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=src})}
 
   function renderImageQueue(){
-    el.imageQueue.innerHTML=state.importFiles.map((f,i)=>`<div class="image-chip"><img src="${f.preview}" alt="${esc(f.name)}"><button type="button" data-remove-image="${i}">×</button><span class="queue-state">${esc(f.status)}</span></div>`).join("");
-    el.imageQueue.querySelectorAll("[data-remove-image]").forEach(btn=>btn.addEventListener("click",()=>{state.importFiles.splice(Number(btn.dataset.removeImage),1);renderImageQueue()}));
+    el.imageQueue.innerHTML=state.importFiles.map((f,i)=>`<div class="image-chip"><img src="${f.preview}" alt="${esc(f.name)}"><button type="button" data-remove-image="${i}" ${state.analyzing?"disabled":""}>×</button><span class="queue-state">${esc(f.status)}</span></div>`).join("");
+    el.imageQueue.querySelectorAll("[data-remove-image]").forEach(btn=>btn.addEventListener("click",()=>{
+      if(state.analyzing)return;
+      state.importFiles.splice(Number(btn.dataset.removeImage),1);renderImageQueue()
+    }));
     el.analyzeButton.disabled=!state.importFiles.some(f=>f.status!=="完了") || state.analyzing;
+    updateQueueSummary();
+  }
+
+  function updateQueueSummary(){
+    if(!el.imageQueueSummary)return;
+    const total=state.importFiles.length;
+    if(!total){el.imageQueueSummary.textContent="待機中";return}
+    const done=state.importFiles.filter(f=>f.status==="完了").length;
+    const failed=state.importFiles.filter(f=>f.status==="失敗").length;
+    const retry=state.importFiles.filter(f=>String(f.status||"").includes("再試行")).length;
+    const active=state.importFiles.filter(f=>["送信中","GAS受信","画像確認","AI解析中","結果整形"].includes(f.status)).length;
+    const waiting=Math.max(0,total-done-failed-retry-active);
+    el.imageQueueSummary.textContent=`${total}枚中 ${done}完了 / ${active}処理中 / ${retry}再試行 / ${waiting}待機 / ${failed}失敗`;
   }
 
   async function analyzeQueuedImages(){
     if(state.analyzing)return;
     const targets=state.importFiles.filter(f=>f.status!=="完了");
     if(!targets.length)return;
+
+    // 手動で再実行したときは、前回「失敗」した画像も新しい巡回として復帰。
+    targets.forEach(f=>{if(f.status==="失敗")f.status="再試行待ち"});
+
     state.analyzing=true;el.analyzeButton.disabled=true;el.imageInput.disabled=true;
+    const maxRounds=Math.max(1,Number(cfg.IMAGE_REQUEUE_MAX_ROUNDS)||6);
+    const baseWait=Math.max(2000,Number(cfg.IMAGE_REQUEUE_BASE_WAIT_MS)||10000);
+
     try{
-      for(let i=0;i<targets.length;i++){
-        const f=targets[i];f.status="送信中";renderImageQueue();
-        try{
-          const parsed=await analyzeImageViaJob(f.dataUrl,f.name);
-          addImportRow(parsed,f.name,false);
-          f.status="完了";
-        }catch(err){
-          console.error(err);f.status="失敗";showToast(`${f.name}: ${err.message}`,true);
+      for(let round=1;round<=maxRounds;round++){
+        const queue=state.importFiles.filter(f=>f.status!=="完了"&&f.status!=="失敗");
+        if(!queue.length)break;
+
+        for(const f of queue){
+          f.rounds=round;
+          f.attempts=(f.attempts||0)+1;
+          f.status=round===1?"送信中":`再試行 ${round}/${maxRounds}`;
+          renderImageQueue();
+
+          try{
+            const parsed=await analyzeImageViaJob(f.dataUrl,f.name);
+            // 1枚完了するたびに既存テーブルへ即時反映して画面更新。
+            addImportRow(parsed,f.name,true);
+            f.status="完了";
+            f.lastError="";
+          }catch(err){
+            console.error(err);
+            f.lastError=err.message||String(err);
+            f.status=round>=maxRounds?"失敗":`再試行待ち ${round}/${maxRounds}`;
+          }
+          renderImageQueue();
         }
-        renderImageQueue();
+
+        const remain=state.importFiles.filter(f=>f.status!=="完了"&&f.status!=="失敗");
+        if(!remain.length)break;
+
+        if(round<maxRounds){
+          const waitMs=Math.min(baseWait*Math.pow(2,round-1),120000);
+          remain.forEach(f=>{
+            f.status=`再試行待ち ${Math.ceil(waitMs/1000)}秒`;
+            f.nextRetryAt=Date.now()+waitMs;
+          });
+          renderImageQueue();
+          await sleep(waitMs);
+        }
+      }
+
+      refreshImportStatuses();
+      renderImportRows();
+
+      const failed=state.importFiles.filter(f=>f.status==="失敗");
+      if(failed.length){
+        showToast(`${failed.length}枚は自動再解析を使い切りました。もう一度AI解析を押すと、その失敗分だけ再開します。`,true);
+      }else{
+        showToast(`${state.importFiles.filter(f=>f.status==="完了").length}枚の解析が完了しました`);
       }
     }finally{
       state.analyzing=false;el.imageInput.disabled=false;renderImageQueue();
@@ -459,6 +526,10 @@
     const existingIndex=state.importRows.findIndex(r=>norm(r.playerName)===norm(playerName) && playerName);
     if(existingIndex>=0){
       const target=state.importRows[existingIndex];
+      if(target.originalPlayerName===undefined)target.originalPlayerName=target.playerName||"";
+      if(!Array.isArray(target.originalEntries)){
+        target.originalEntries=(target.entries||[]).map(e=>({attribute:e.attribute||"",power:e.power??""}));
+      }
       target.playerName=playerName||target.playerName;
       target.entries=normalizedEntries;
       target.source=source;
@@ -467,8 +538,16 @@
       target.deleted=false;
     }else{
       state.importRows.push({
-        id:cryptoId(),playerName,entries:normalizedEntries,source,
-        status:"new",notes:parsed.notes||"",aiUpdated:source!=="manual",deleted:false
+        id:cryptoId(),
+        playerName,
+        originalPlayerName:"",
+        entries:normalizedEntries,
+        originalEntries:[{attribute:"",power:""},{attribute:"",power:""},{attribute:"",power:""}],
+        source,
+        status:"new",
+        notes:parsed.notes||"",
+        aiUpdated:source!=="manual",
+        deleted:false
       });
     }
     state.editorDirty=true;
@@ -483,6 +562,22 @@
     });
   }
 
+  function isChangedValue(current, original){
+    return String(current??"").trim()!==String(original??"").trim();
+  }
+
+  function diffMeta(row,index,key){
+    if(row.status==="new")return {changed:true,oldValue:""};
+    if(key==="playerName"){
+      const oldValue=row.originalPlayerName??"";
+      return {changed:isChangedValue(row.playerName,oldValue),oldValue};
+    }
+    const oldEntry=(row.originalEntries||[])[index]||{};
+    const current=(row.entries||[])[index]||{};
+    const oldValue=oldEntry[key]??"";
+    return {changed:isChangedValue(current[key],oldValue),oldValue};
+  }
+
   function renderImportRows(){
     if(!state.importRows.length){
       el.importResults.innerHTML=`<div class="empty-state"><div>📋</div><strong>登録データがありません</strong><span>スクショを追加するか、手入力で新規メンバーを追加してください。</span></div>`;
@@ -492,28 +587,64 @@
       el.saveImportButton.disabled=true;
       return;
     }
+
     el.importResults.innerHTML=state.importRows.map((r,i)=>{
       const confVals=r.entries.filter(e=>e.power!=="").map(e=>Number(e.confidence)||0);
       const conf=Math.min(...(confVals.length?confVals:[1]));
       const confClass=conf>=.85?"high":conf>=.6?"mid":"low";
       const confText=conf>=.85?"読取良好":conf>=.6?"要確認":"手修正推奨";
-      const rowClass=["import-row",r.aiUpdated?"ai-updated":"",r.status==="new"?"is-new":"",r.deleted?"is-deleted":""].filter(Boolean).join(" ");
+
+      const nameDiff=diffMeta(r,0,"playerName");
+      const changedCells=[
+        nameDiff.changed,
+        ...r.entries.flatMap((e,j)=>[
+          diffMeta(r,j,"attribute").changed,
+          diffMeta(r,j,"power").changed
+        ])
+      ].filter(Boolean).length;
+
+      const rowClass=[
+        "import-row",
+        r.aiUpdated?"ai-updated":"",
+        r.status==="new"?"is-new":"",
+        r.deleted?"is-deleted":"",
+        changedCells?"has-diff":""
+      ].filter(Boolean).join(" ");
+
       return `<div class="${rowClass}" data-import-index="${i}">
         <div class="import-row-head">
-          <input class="player-input" data-import-key="playerName" value="${escAttr(r.playerName)}" placeholder="プレイヤー名" ${r.deleted?"disabled":""}>
+          <div class="field-with-diff name-field-wrap">
+            <input class="player-input ${nameDiff.changed?"changed-field":""}" data-import-key="playerName" value="${escAttr(r.playerName)}" placeholder="プレイヤー名" ${r.deleted?"disabled":""}>
+            ${nameDiff.changed&&r.status!=="new"?`<div class="old-value">変更前: ${esc(nameDiff.oldValue||"空欄")}</div>`:""}
+          </div>
           <div class="row-badges">
             <span class="row-status ${r.status}">${r.deleted?"削除予定":r.status==="update"?"既存":"新規"}</span>
             ${r.aiUpdated&&!r.deleted?`<span class="ai-badge">AI更新</span>`:""}
+            ${changedCells&&!r.deleted?`<span class="diff-badge">${changedCells}項目変更</span>`:""}
           </div>
           <button class="remove-row danger" type="button" data-toggle-delete="${i}" aria-label="${r.deleted?"削除取消":"削除"}">${r.deleted?"↩":"🗑"}</button>
         </div>
-        <div class="power-grid">${r.entries.map((e,j)=>`<div class="power-entry">
-          <select data-entry-index="${j}" data-entry-key="attribute" ${r.deleted?"disabled":""}>${options(["火","水","草"],e.attribute,true,"属性")}</select>
-          <label class="power-man-input">
-            <input type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力" ${r.deleted?"disabled":""}>
-            <span>万</span>
-          </label>
-        </div>`).join("")}</div>
+
+        <div class="power-grid">${r.entries.map((e,j)=>{
+          const attrDiff=diffMeta(r,j,"attribute");
+          const powerDiff=diffMeta(r,j,"power");
+          return `<div class="power-entry">
+            <div class="field-with-diff">
+              <select class="${attrDiff.changed?"changed-field":""}" data-entry-index="${j}" data-entry-key="attribute" ${r.deleted?"disabled":""}>
+                ${options(["火","水","草"],e.attribute,true,"属性")}
+              </select>
+              ${attrDiff.changed&&r.status!=="new"?`<div class="old-value">変更前: ${esc(attrDiff.oldValue||"空欄")}</div>`:""}
+            </div>
+            <div class="field-with-diff">
+              <label class="power-man-input ${powerDiff.changed?"changed-field-wrap":""}">
+                <input class="${powerDiff.changed?"changed-field":""}" type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力" ${r.deleted?"disabled":""}>
+                <span>万</span>
+              </label>
+              ${powerDiff.changed&&r.status!=="new"?`<div class="old-value">変更前: ${esc(powerDiff.oldValue===""?"空欄":String(powerDiff.oldValue)+"万")}</div>`:""}
+            </div>
+          </div>`;
+        }).join("")}</div>
+
         <div class="import-meta">
           <span>${esc(r.source||"既存データ")}</span>
           ${r.aiUpdated&&!r.deleted?`<span class="confidence ${confClass}">● ${confText}</span>`:""}
@@ -521,11 +652,12 @@
         </div>
       </div>`;
     }).join("");
+
     const active=state.importRows.filter(r=>!r.deleted);
-    const valid=active.filter(validImportRow).length;
     const updates=active.filter(r=>validImportRow(r)&&r.status==="update").length;
     const news=active.filter(r=>validImportRow(r)&&r.status==="new").length;
     const dels=state.importRows.filter(r=>r.deleted).length;
+
     el.importCount.textContent=`${active.length}件`;
     el.importSummaryText.textContent=state.editorDirty?`変更あり｜更新 ${updates} / 新規 ${news} / 削除 ${dels}`:`変更なし｜登録 ${active.length}件`;
     el.importActionBar.classList.remove("hidden");
@@ -581,8 +713,11 @@
       state.guildRoster=res.rows||[];
       state.guildRosterOriginal=JSON.parse(JSON.stringify(state.guildRoster));
       state.importRows=state.guildRoster.map(r=>({
-        id:cryptoId(),playerName:r.playerName||"",
+        id:cryptoId(),
+        playerName:r.playerName||"",
+        originalPlayerName:r.playerName||"",
         entries:(r.entries||[]).slice(0,3).map(e=>({attribute:e.attribute||"",power:e.power??"",rawText:"",confidence:1})),
+        originalEntries:(r.entries||[]).slice(0,3).map(e=>({attribute:e.attribute||"",power:e.power??""})),
         source:"既存データ",status:"update",notes:"",aiUpdated:false,deleted:false
       }));
       state.editorDirty=false;refreshImportStatuses();renderImportRows();
