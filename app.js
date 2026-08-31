@@ -145,25 +145,47 @@
     });
   }
 
-  async function postJson(payload, timeoutMs) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
-    try {
-      const res = await fetch(cfg.API_URL, {
-        method:"POST",
-        headers:{"Content-Type":"text/plain;charset=utf-8"},
-        body:JSON.stringify(payload),
-        signal:ctrl.signal,
-        redirect:"follow"
-      });
-      const text = await res.text();
-      let data;
-      try { data = JSON.parse(text); } catch { throw new Error("AI解析APIの応答を読み取れませんでした。"); }
-      if (!data?.ok) throw new Error(data?.error || "処理に失敗しました");
-      return data;
-    } finally {
-      clearTimeout(timer);
+  async function analyzeImageViaJob(imageData, filename) {
+    const jobId = cryptoId();
+    const payload = {
+      action: "analyzeImageJob",
+      jobId,
+      imageData,
+      filename
+    };
+
+    // Apps Script Web Appへのcross-origin POSTはレスポンス読取で
+    // "Failed to fetch" になることがあるため、no-corsで投げて
+    // 結果はJSONP(GET)で別取得する。
+    fetch(cfg.API_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      redirect: "follow",
+      keepalive: false
+    }).catch(err => console.warn("analysis submit:", err));
+
+    const started = Date.now();
+    const timeoutMs = cfg.IMAGE_ANALYZE_TIMEOUT_MS || 90000;
+
+    while (Date.now() - started < timeoutMs) {
+      await sleep(1400);
+      const res = await jsonp(
+        { action: "analysisResult", jobId, t: Date.now() },
+        cfg.VERSION_REQUEST_TIMEOUT_MS || 12000
+      );
+
+      if (!res?.ok) throw new Error(res?.error || "画像解析結果の取得に失敗しました。");
+      if (res.status === "done") return res.data;
+      if (res.status === "error") throw new Error(res.error || "画像解析に失敗しました。");
     }
+
+    throw new Error("画像解析がタイムアウトしました。");
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async function updateField(target) {
@@ -330,8 +352,7 @@
       for(let i=0;i<targets.length;i++){
         const f=targets[i];f.status=`解析 ${i+1}/${targets.length}`;renderImageQueue();
         try{
-          const res=await postJson({action:"analyzeImage",imageData:f.dataUrl,filename:f.name},cfg.IMAGE_ANALYZE_TIMEOUT_MS);
-          const parsed=res.data;
+          const parsed=await analyzeImageViaJob(f.dataUrl,f.name);
           addImportRow(parsed,f.name,false);
           f.status="完了";
         }catch(err){
