@@ -123,7 +123,7 @@
         state.importGuild = state.data.options.guilds?.[0] || "";
       }
       render();
-      if (state.importGuild) if(!state.protectUnsavedRoster)await if(!state.protectUnsavedRoster)loadGuildRoster(false);
+      if (state.importGuild && !state.protectUnsavedRoster) await loadGuildRoster(false);
       setStatus("ok",`同期 ${timeText()}`);
     } catch(err) {
       console.error(err);
