@@ -21,6 +21,7 @@
     guildRosterOriginal: [],
     deletedMembers: [],
     editorDirty: false,
+    protectUnsavedRoster: false,
     analyzing: false
   };
 
@@ -58,17 +59,28 @@
     document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
     document.addEventListener("change", handleChange);
 
-    el.importGuild.addEventListener("change", async () => {
-      state.importGuild = el.importGuild.value;
-      await loadGuildRoster();
-      refreshImportStatuses();
-      renderImportRows();
+    el.importGuild.addEventListener("change",async()=>{
+      const nextGuild=el.importGuild.value;
+      if(state.editorDirty && nextGuild!==state.importGuild){
+        const ok=confirm("未保存の変更があります。ギルドを切り替えると変更内容を破棄します。よろしいですか？");
+        if(!ok){
+          el.importGuild.value=state.importGuild||"";
+          return;
+        }
+        setEditorDirty(false);
+      }
+      state.importGuild=nextGuild;
+      await loadGuildRoster(true,true);
     });
     el.imageInput.addEventListener("change", onImagesSelected);
     el.analyzeButton.addEventListener("click", analyzeQueuedImages);
     el.addManualButton.addEventListener("click", () => addImportRow({playerName:"", entries:[]}, "manual"));
     el.saveImportButton.addEventListener("click", saveImportedRows);
-    if(el.discardImportButton)el.discardImportButton.addEventListener("click",()=>{if(state.editorDirty&&!confirm("未保存の変更を破棄して再読込しますか？"))return;loadGuildRoster();});
+    if(el.discardImportButton)el.discardImportButton.addEventListener("click",async()=>{
+      if(state.editorDirty&&!confirm("未保存の変更を破棄して再読込しますか？"))return;
+      setEditorDirty(false);
+      await loadGuildRoster(true,true);
+    });
     el.newGuildButton.addEventListener("click", () => { el.newGuildName.value=""; el.newGuildDialog.showModal(); setTimeout(()=>el.newGuildName.focus(),50); });
     el.newGuildForm.addEventListener("submit", createGuild);
     el.guildDataButton.addEventListener("click", openGuildData);
@@ -86,7 +98,7 @@
       if(!btn)return;
       const i=Number(btn.dataset.toggleDelete),row=state.importRows[i];if(!row)return;
       if(row.status==="new"&&!row.playerName){state.importRows.splice(i,1)}else{row.deleted=!row.deleted}
-      state.editorDirty=true;refreshImportStatuses();renderImportRows();
+      setEditorDirty(true);refreshImportStatuses();renderImportRows();
     });
 
     document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(true); });
@@ -111,7 +123,7 @@
         state.importGuild = state.data.options.guilds?.[0] || "";
       }
       render();
-      if (state.importGuild) await loadGuildRoster(false);
+      if (state.importGuild) if(!state.protectUnsavedRoster)await if(!state.protectUnsavedRoster)loadGuildRoster(false);
       setStatus("ok",`同期 ${timeText()}`);
     } catch(err) {
       console.error(err);
@@ -456,7 +468,10 @@
     // 手動で再実行したときは、前回「失敗」した画像も新しい巡回として復帰。
     targets.forEach(f=>{if(f.status==="失敗")f.status="再試行待ち"});
 
-    state.analyzing=true;el.analyzeButton.disabled=true;el.imageInput.disabled=true;
+    state.analyzing=true;
+    // 解析開始後に黄色になった未保存結果は、保存/破棄まで自動同期から保護する。
+    state.protectUnsavedRoster=true;
+    el.analyzeButton.disabled=true;el.imageInput.disabled=true;
     const maxRounds=Math.max(1,Number(cfg.IMAGE_REQUEUE_MAX_ROUNDS)||6);
     const baseWait=Math.max(2000,Number(cfg.IMAGE_REQUEUE_BASE_WAIT_MS)||10000);
 
@@ -550,9 +565,14 @@
         deleted:false
       });
     }
-    state.editorDirty=true;
+    setEditorDirty(true);
     refreshImportStatuses();
     if(rerender!==false)renderImportRows();
+  }
+
+  function setEditorDirty(flag=true){
+    state.editorDirty=!!flag;
+    state.protectUnsavedRoster=!!flag;
   }
 
   function refreshImportStatuses(){
@@ -659,7 +679,9 @@
     const dels=state.importRows.filter(r=>r.deleted).length;
 
     el.importCount.textContent=`${active.length}件`;
-    el.importSummaryText.textContent=state.editorDirty?`変更あり｜更新 ${updates} / 新規 ${news} / 削除 ${dels}`:`変更なし｜登録 ${active.length}件`;
+    el.importSummaryText.textContent=state.editorDirty
+      ? `変更あり｜更新 ${updates} / 新規 ${news} / 削除 ${dels}｜未保存データ保護中`
+      : `変更なし｜登録 ${active.length}件`;
     el.importActionBar.classList.remove("hidden");
     el.saveImportButton.disabled=!state.editorDirty||!state.importGuild;
   }
@@ -675,7 +697,7 @@
       row.entries[j][key]=e.target.value;
     }
     row.aiUpdated=false;
-    state.editorDirty=true;
+    setEditorDirty(true);
     refreshImportStatuses();
     renderImportRows();
   }
@@ -698,14 +720,20 @@
       const res=await jsonp({action:"saveGuildEditor",guild:state.importGuild,payload},60000);
       if(!res?.ok)throw new Error(res?.error||"保存失敗");
       showToast(`保存完了：更新 ${res.updated||0} / 新規 ${res.created||0} / 削除 ${res.deleted||0}`);
-      await loadGuildRoster(false);await loadFull(false);
+      setEditorDirty(false);
+      await loadGuildRoster(false,true);
+      await loadFull(false);
     }catch(err){console.error(err);showToast(err.message,true)}
     finally{el.saveImportButton.disabled=false;el.saveImportButton.textContent="変更をまとめて保存"}
   }
 
-  async function loadGuildRoster(showError=true){
+  async function loadGuildRoster(showError=true,forceReload=false){
+    // 未保存変更がある間は、通常の同期や再取得で編集内容を上書きしない。
+    if(state.protectUnsavedRoster && !forceReload){
+      return {ok:true,protected:true};
+    }
     if(!state.importGuild){
-      state.guildRoster=[];state.guildRosterOriginal=[];state.importRows=[];state.editorDirty=false;renderImportRows();return;
+      state.guildRoster=[];state.guildRosterOriginal=[];state.importRows=[];setEditorDirty(false);renderImportRows();return;
     }
     try{
       const res=await jsonp({action:"guildRoster",guild:state.importGuild,t:Date.now()},20000);
@@ -720,7 +748,7 @@
         originalEntries:(r.entries||[]).slice(0,3).map(e=>({attribute:e.attribute||"",power:e.power??""})),
         source:"既存データ",status:"update",notes:"",aiUpdated:false,deleted:false
       }));
-      state.editorDirty=false;refreshImportStatuses();renderImportRows();
+      setEditorDirty(false);refreshImportStatuses();renderImportRows();
     }catch(err){if(showError)showToast(err.message,true)}
   }
 
