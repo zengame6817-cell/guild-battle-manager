@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b1220">
   <title>ギルド対戦管理</title>
-  <link rel="stylesheet" href="style-v2.2.16.css?v=2214">
+  <link rel="stylesheet" href="style-v2.2.17.css?v=2214">
 </head>
 <body>
   <header class="topbar">
@@ -123,15 +123,15 @@
     <form method="dialog" id="newGuildForm">
       <div class="modal-head">
         <div><strong>新しいギルドを作成</strong><span>テンプレートを複製して自動作成します。</span></div>
-        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+        <button type="button" class="icon-button" id="cancelNewGuildX" aria-label="閉じる">×</button>
       </div>
       <label class="field">
         <span>ギルド名</span>
         <input id="newGuildName" maxlength="80" required placeholder="例：Night Raven">
       </label>
       <div class="modal-actions">
-        <button class="button ghost" value="cancel">キャンセル</button>
-        <button id="createGuildButton" class="button primary" value="default">作成</button>
+        <button type="button" class="button ghost" id="cancelNewGuildButton">キャンセル</button>
+        <button type="submit" id="createGuildButton" class="button primary">作成</button>
       </div>
     </form>
   </dialog>
@@ -165,7 +165,7 @@
     }
   });
 </script>
-<script src="config-v2.2.16.js?v=2214" onerror="document.getElementById('connectionStatus').textContent='設定読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
-  <script src="app-v2.2.16.js?v=2214" onerror="document.getElementById('connectionStatus').textContent='アプリ読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
+<script src="config-v2.2.17.js?v=2214" onerror="document.getElementById('connectionStatus').textContent='設定読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
+  <script src="app-v2.2.17.js?v=2214" onerror="document.getElementById('connectionStatus').textContent='アプリ読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
 </body>
 </html>
