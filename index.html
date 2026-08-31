@@ -1,31 +1,35 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-theme="system">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#07111f">
-  <title>ギルド対戦管理 v2.1</title>
+  <meta name="theme-color" content="#0b1220">
+  <title>ギルド対戦管理 v2.2</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <strong>ギルド対戦管理</strong>
-      <span class="version">v2.1</span>
+      <div class="brand-mark">GB</div>
+      <div class="brand-copy">
+        <strong>Guild Battle</strong>
+        <span>Manager <b>v2.2</b></span>
+      </div>
       <span id="connectionStatus" class="status loading">接続中</span>
     </div>
 
     <div class="top-actions">
-      <select id="modeSelect" aria-label="モード">
+      <select id="modeSelect" class="compact-select" aria-label="モード">
         <option value="normal">通常</option>
         <option value="z">Z</option>
       </select>
-      <button id="refreshButton" type="button" class="refresh" aria-label="手動更新">↻</button>
+      <button id="themeButton" class="icon-button" type="button" aria-label="テーマ切替" title="テーマ切替">◐</button>
+      <button id="refreshButton" class="icon-button" type="button" aria-label="手動更新" title="手動更新">↻</button>
     </div>
   </header>
 
   <main class="app">
-    <section class="controlbar">
+    <section id="battleControls" class="controlbar">
       <div id="guildSelectors" class="guilds"></div>
       <input id="searchInput" class="search" type="search" placeholder="名前検索">
       <select id="statusFilter" class="filter" aria-label="表示条件">
@@ -39,22 +43,113 @@
 
     <section id="summary" class="summary"></section>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="members" type="button">メンバー</button>
-      <button class="tab" data-tab="battle" type="button">戦力比較</button>
-      <button class="tab" data-tab="enemies" type="button">相手配置</button>
+    <nav class="tabs" aria-label="メインメニュー">
+      <button class="tab active" data-tab="members" type="button"><span>👥</span>メンバー</button>
+      <button class="tab" data-tab="battle" type="button"><span>⚔</span>戦力比較</button>
+      <button class="tab" data-tab="enemies" type="button"><span>📍</span>相手配置</button>
+      <button class="tab" data-tab="import" type="button"><span>📷</span>戦力取込</button>
     </nav>
 
     <section id="membersPanel" class="panel active"></section>
     <section id="battlePanel" class="panel"></section>
     <section id="enemiesPanel" class="panel"></section>
+
+    <section id="importPanel" class="panel import-panel">
+      <div class="import-toolbar">
+        <label class="field grow">
+          <span>登録先ギルド</span>
+          <select id="importGuild"></select>
+        </label>
+        <button id="newGuildButton" class="button secondary" type="button">＋ 新規ギルド</button>
+        <button id="guildDataButton" class="button ghost" type="button">データ管理</button>
+      </div>
+
+      <div class="upload-card">
+        <div class="upload-copy">
+          <div class="upload-icon">📷</div>
+          <div>
+            <strong>東京ディバンカーのスクショを追加</strong>
+            <p>複数枚OK。スマホの写真アプリからそのまま選べます。</p>
+          </div>
+        </div>
+        <label class="button primary file-button">
+          画像を選択
+          <input id="imageInput" type="file" accept="image/*" multiple hidden>
+        </label>
+      </div>
+
+      <div id="imageQueue" class="image-queue"></div>
+
+      <div class="import-head">
+        <div>
+          <h2>解析結果</h2>
+          <p id="importHint">画像を選ぶと、名前・属性・戦力上位3件を読み取ります。</p>
+        </div>
+        <div class="import-head-actions">
+          <button id="addManualButton" class="button ghost" type="button">＋ 手入力</button>
+          <button id="analyzeButton" class="button secondary" type="button" disabled>AI解析</button>
+        </div>
+      </div>
+
+      <div id="importResults" class="import-results">
+        <div class="empty-state">
+          <div>📸</div>
+          <strong>まだ解析データがありません</strong>
+          <span>スクショを追加するか、手入力を選んでください。</span>
+        </div>
+      </div>
+
+      <div id="importActionBar" class="import-action-bar hidden">
+        <div>
+          <strong id="importCount">0件</strong>
+          <span id="importSummaryText">登録準備中</span>
+        </div>
+        <button id="saveImportButton" class="button primary" type="button">スプレッドシートへ反映</button>
+      </div>
+    </section>
   </main>
 
-  <nav class="bottom-nav">
-    <button class="bottom-tab active" data-tab="members" type="button">メンバー</button>
-    <button class="bottom-tab" data-tab="battle" type="button">戦力比較</button>
-    <button class="bottom-tab" data-tab="enemies" type="button">相手配置</button>
+  <nav class="bottom-nav" aria-label="モバイルメニュー">
+    <button class="bottom-tab active" data-tab="members" type="button"><span>👥</span><small>メンバー</small></button>
+    <button class="bottom-tab" data-tab="battle" type="button"><span>⚔</span><small>比較</small></button>
+    <button class="bottom-tab" data-tab="enemies" type="button"><span>📍</span><small>配置</small></button>
+    <button class="bottom-tab" data-tab="import" type="button"><span>📷</span><small>取込</small></button>
   </nav>
+
+  <dialog id="newGuildDialog" class="modal">
+    <form method="dialog" id="newGuildForm">
+      <div class="modal-head">
+        <div><strong>新しいギルドを作成</strong><span>テンプレートを複製して自動作成します。</span></div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <label class="field">
+        <span>ギルド名</span>
+        <input id="newGuildName" maxlength="80" required placeholder="例：Night Raven">
+      </label>
+      <div class="modal-actions">
+        <button class="button ghost" value="cancel">キャンセル</button>
+        <button id="createGuildButton" class="button primary" value="default">作成</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="guildDataDialog" class="modal wide">
+    <form method="dialog">
+      <div class="modal-head">
+        <div><strong>ギルドデータ管理</strong><span id="manageGuildName"></span></div>
+        <button class="icon-button" value="cancel" aria-label="閉じる">×</button>
+      </div>
+      <div id="guildRoster" class="guild-roster"></div>
+      <div class="danger-zone">
+        <strong>データ削除</strong>
+        <p>行そのものは削除せず、戦力データだけを消します。</p>
+        <div class="danger-actions">
+          <button id="clearGuildButton" class="button danger-outline" type="button">このギルドの戦力を全削除</button>
+          <button id="deleteGuildButton" class="button danger" type="button">ギルドシートを削除</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
