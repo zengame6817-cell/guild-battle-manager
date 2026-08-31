@@ -122,3 +122,33 @@ table{width:100%;border-collapse:collapse}.data-table{min-width:1070px}
 .service-status.ok{color:var(--green)}
 .service-status.warn{color:var(--amber)}
 .service-status.error{color:var(--red)}
+
+
+/* v2.2.7: 戦力入力はスプレッドシートと同じ「万」単位 */
+.power-man-input{
+  display:flex;
+  align-items:center;
+  min-width:0;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--surface);
+  overflow:hidden;
+}
+.power-man-input input{
+  flex:1;
+  min-width:0;
+  border:0 !important;
+  border-radius:0 !important;
+  background:transparent !important;
+}
+.power-man-input input:focus{
+  outline:none;
+  box-shadow:none !important;
+}
+.power-man-input span{
+  flex:0 0 auto;
+  padding:0 10px 0 4px;
+  font-weight:700;
+  color:var(--muted);
+  white-space:nowrap;
+}

@@ -445,7 +445,14 @@
     const entries=[...(parsed.entries||[])].slice(0,3);
     while(entries.length<3)entries.push({attribute:"",power:"",rawText:"",confidence:1});
     state.importRows.push({
-      id:cryptoId(),playerName:parsed.playerName||"",entries:entries.map(x=>({attribute:x.attribute||"",power:x.power??"",rawText:x.rawText||"",confidence:Number(x.confidence??1)})),
+      id:cryptoId(),playerName:parsed.playerName||"",entries:entries.map(x=>({
+        attribute:x.attribute||"",
+        // AIは実戦力(例 16100000)を返すので、解析データだけ万単位(1610)へ統一。
+        // 手入力は最初から万単位で入力する。
+        power:source==="manual"?(x.power??""):toManPower(x.power),
+        rawText:x.rawText||"",
+        confidence:Number(x.confidence??1)
+      })),
       source,status:"new",notes:parsed.notes||""
     });
     refreshImportStatuses();
@@ -476,7 +483,10 @@
           <select data-entry-index="${j}" data-entry-key="attribute">
             ${options(["火","水","草","不明"],e.attribute,true,"属性")}
           </select>
-          <input type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力">
+          <label class="power-man-input">
+            <input type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力">
+            <span>万</span>
+          </label>
         </div>`).join("")}</div>
         <div class="import-meta"><span>${esc(r.source)}</span><span class="confidence ${confClass}">● ${confText}</span>${r.notes?`<span>${esc(r.notes)}</span>`:""}</div>
       </div>`;
@@ -552,7 +562,7 @@
     if(!state.guildRoster.length){el.guildRoster.innerHTML=`<div class="empty">登録データなし</div>`;return}
     el.guildRoster.innerHTML=state.guildRoster.map(r=>`<div class="roster-row">
       <strong>${esc(r.playerName)}</strong>
-      <span class="roster-powers">${r.entries.map(e=>`${esc(e.attribute)} ${formatPower(e.power)}`).join(" / ")}</span>
+      <span class="roster-powers">${r.entries.map(e=>`${esc(e.attribute)} ${formatPower(e.power)}万`).join(" / ")}</span>
       <button class="roster-delete" type="button" data-delete-member="${escAttr(r.playerName)}">削除</button>
     </div>`).join("");
   }
@@ -608,6 +618,14 @@
   function num(v){const n=Number(String(v||"").replace(/[^\d.-]/g,""));return Number.isFinite(n)?n:0}
   function diff(v){const c=v>0?"plus":v<0?"minus":"zero";return `<span class="diff ${c}">${v>0?"+":""}${v.toLocaleString("ja-JP")}</span>`}
   function powerClass(v){return v>=0?"power-good":"power-bad"}
+
+  function toManPower(value){
+    if(value===""||value==null)return "";
+    const n=Number(value);
+    if(!Number.isFinite(n)||n<0)return "";
+    return Math.floor(n/10000);
+  }
+
   function formatPower(v){const n=Number(v)||0;return n.toLocaleString("ja-JP")}
   function norm(v){return String(v||"").normalize("NFKC").trim().toLowerCase()}
   function cryptoId(){return globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}
