@@ -18,6 +18,9 @@
     importFiles: [],
     importRows: [],
     guildRoster: [],
+    guildRosterOriginal: [],
+    deletedMembers: [],
+    editorDirty: false,
     analyzing: false
   };
 
@@ -29,7 +32,7 @@
     importGuild: $("importGuild"), newGuildButton: $("newGuildButton"), guildDataButton: $("guildDataButton"),
     imageInput: $("imageInput"), imageQueue: $("imageQueue"), analyzeButton: $("analyzeButton"), addManualButton: $("addManualButton"),
     importResults: $("importResults"), importHint: $("importHint"), importActionBar: $("importActionBar"), importCount: $("importCount"),
-    importSummaryText: $("importSummaryText"), saveImportButton: $("saveImportButton"), toast: $("toast"),
+    importSummaryText: $("importSummaryText"), saveImportButton: $("saveImportButton"), discardImportButton: $("discardImportButton"), toast: $("toast"),
     newGuildDialog: $("newGuildDialog"), newGuildForm: $("newGuildForm"), newGuildName: $("newGuildName"),
     guildDataDialog: $("guildDataDialog"), manageGuildName: $("manageGuildName"), guildRoster: $("guildRoster"),
     clearGuildButton: $("clearGuildButton"), deleteGuildButton: $("deleteGuildButton")
@@ -65,6 +68,7 @@
     el.analyzeButton.addEventListener("click", analyzeQueuedImages);
     el.addManualButton.addEventListener("click", () => addImportRow({playerName:"", entries:[]}, "manual"));
     el.saveImportButton.addEventListener("click", saveImportedRows);
+    if(el.discardImportButton)el.discardImportButton.addEventListener("click",()=>{if(state.editorDirty&&!confirm("未保存の変更を破棄して再読込しますか？"))return;loadGuildRoster();});
     el.newGuildButton.addEventListener("click", () => { el.newGuildName.value=""; el.newGuildDialog.showModal(); setTimeout(()=>el.newGuildName.focus(),50); });
     el.newGuildForm.addEventListener("submit", createGuild);
     el.guildDataButton.addEventListener("click", openGuildData);
@@ -78,10 +82,11 @@
     el.importResults.addEventListener("input", onImportRowEdit);
     el.importResults.addEventListener("change", onImportRowEdit);
     el.importResults.addEventListener("click", e => {
-      const btn = e.target.closest("[data-remove-import]");
-      if (!btn) return;
-      state.importRows.splice(Number(btn.dataset.removeImport), 1);
-      renderImportRows();
+      const btn=e.target.closest("[data-toggle-delete]");
+      if(!btn)return;
+      const i=Number(btn.dataset.toggleDelete),row=state.importRows[i];if(!row)return;
+      if(row.status==="new"&&!row.playerName){state.importRows.splice(i,1)}else{row.deleted=!row.deleted}
+      state.editorDirty=true;refreshImportStatuses();renderImportRows();
     });
 
     document.addEventListener("visibilitychange", () => { if (!document.hidden) checkVersion(true); });
@@ -444,67 +449,103 @@
   function addImportRow(parsed,source="manual",rerender=true){
     const entries=[...(parsed.entries||[])].slice(0,3);
     while(entries.length<3)entries.push({attribute:"",power:"",rawText:"",confidence:1});
-    state.importRows.push({
-      id:cryptoId(),playerName:parsed.playerName||"",entries:entries.map(x=>({
-        attribute:x.attribute||"",
-        // AIは実戦力(例 16100000)を返すので、解析データだけ万単位(1610)へ統一。
-        // 手入力は最初から万単位で入力する。
-        power:source==="manual"?(x.power??""):toManPower(x.power),
-        rawText:x.rawText||"",
-        confidence:Number(x.confidence??1)
-      })),
-      source,status:"new",notes:parsed.notes||""
-    });
+    const normalizedEntries=entries.map(x=>({
+      attribute:x.attribute||"",
+      power:source==="manual"?(x.power??""):toManPower(x.power),
+      rawText:x.rawText||"",
+      confidence:Number(x.confidence??1)
+    }));
+    const playerName=String(parsed.playerName||"").trim();
+    const existingIndex=state.importRows.findIndex(r=>norm(r.playerName)===norm(playerName) && playerName);
+    if(existingIndex>=0){
+      const target=state.importRows[existingIndex];
+      target.playerName=playerName||target.playerName;
+      target.entries=normalizedEntries;
+      target.source=source;
+      target.notes=parsed.notes||"";
+      target.aiUpdated=true;
+      target.deleted=false;
+    }else{
+      state.importRows.push({
+        id:cryptoId(),playerName,entries:normalizedEntries,source,
+        status:"new",notes:parsed.notes||"",aiUpdated:source!=="manual",deleted:false
+      });
+    }
+    state.editorDirty=true;
     refreshImportStatuses();
     if(rerender!==false)renderImportRows();
   }
 
   function refreshImportStatuses(){
-    const names=new Set(state.guildRoster.map(r=>norm(r.playerName)));
-    state.importRows.forEach(r=>{r.status=r.playerName && names.has(norm(r.playerName))?"update":"new"});
+    const names=new Set(state.guildRosterOriginal.map(r=>norm(r.playerName)));
+    state.importRows.forEach(r=>{
+      r.status=r.deleted?"deleted":(r.playerName&&names.has(norm(r.playerName))?"update":"new");
+    });
   }
 
   function renderImportRows(){
     if(!state.importRows.length){
-      el.importResults.innerHTML=`<div class="empty-state"><div>📸</div><strong>まだ解析データがありません</strong><span>スクショを追加するか、手入力を選んでください。</span></div>`;
-      el.importActionBar.classList.add("hidden");return;
+      el.importResults.innerHTML=`<div class="empty-state"><div>📋</div><strong>登録データがありません</strong><span>スクショを追加するか、手入力で新規メンバーを追加してください。</span></div>`;
+      el.importCount.textContent="0件";
+      el.importSummaryText.textContent="変更なし";
+      el.importActionBar.classList.remove("hidden");
+      el.saveImportButton.disabled=true;
+      return;
     }
     el.importResults.innerHTML=state.importRows.map((r,i)=>{
-      const conf=Math.min(...r.entries.filter(e=>e.power!=="").map(e=>Number(e.confidence)||0),1);
+      const confVals=r.entries.filter(e=>e.power!=="").map(e=>Number(e.confidence)||0);
+      const conf=Math.min(...(confVals.length?confVals:[1]));
       const confClass=conf>=.85?"high":conf>=.6?"mid":"low";
       const confText=conf>=.85?"読取良好":conf>=.6?"要確認":"手修正推奨";
-      return `<div class="import-row" data-import-index="${i}">
+      const rowClass=["import-row",r.aiUpdated?"ai-updated":"",r.status==="new"?"is-new":"",r.deleted?"is-deleted":""].filter(Boolean).join(" ");
+      return `<div class="${rowClass}" data-import-index="${i}">
         <div class="import-row-head">
-          <input class="player-input" data-import-key="playerName" value="${escAttr(r.playerName)}" placeholder="プレイヤー名">
-          <span class="row-status ${r.status}">${r.status==="update"?"既存 → 更新":"新規"}</span>
-          <button class="remove-row" type="button" data-remove-import="${i}" aria-label="削除">×</button>
+          <input class="player-input" data-import-key="playerName" value="${escAttr(r.playerName)}" placeholder="プレイヤー名" ${r.deleted?"disabled":""}>
+          <div class="row-badges">
+            <span class="row-status ${r.status}">${r.deleted?"削除予定":r.status==="update"?"既存":"新規"}</span>
+            ${r.aiUpdated&&!r.deleted?`<span class="ai-badge">AI更新</span>`:""}
+          </div>
+          <button class="remove-row danger" type="button" data-toggle-delete="${i}" aria-label="${r.deleted?"削除取消":"削除"}">${r.deleted?"↩":"🗑"}</button>
         </div>
         <div class="power-grid">${r.entries.map((e,j)=>`<div class="power-entry">
-          <select data-entry-index="${j}" data-entry-key="attribute">
-            ${options(["火","水","草","不明"],e.attribute,true,"属性")}
-          </select>
+          <select data-entry-index="${j}" data-entry-key="attribute" ${r.deleted?"disabled":""}>${options(["火","水","草"],e.attribute,true,"属性")}</select>
           <label class="power-man-input">
-            <input type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力">
+            <input type="number" min="0" step="1" inputmode="numeric" data-entry-index="${j}" data-entry-key="power" value="${escAttr(e.power)}" placeholder="戦力" ${r.deleted?"disabled":""}>
             <span>万</span>
           </label>
         </div>`).join("")}</div>
-        <div class="import-meta"><span>${esc(r.source)}</span><span class="confidence ${confClass}">● ${confText}</span>${r.notes?`<span>${esc(r.notes)}</span>`:""}</div>
+        <div class="import-meta">
+          <span>${esc(r.source||"既存データ")}</span>
+          ${r.aiUpdated&&!r.deleted?`<span class="confidence ${confClass}">● ${confText}</span>`:""}
+          ${r.notes&&!r.deleted?`<span>${esc(r.notes)}</span>`:""}
+        </div>
       </div>`;
     }).join("");
-    const valid=state.importRows.filter(validImportRow).length,updates=state.importRows.filter(r=>validImportRow(r)&&r.status==="update").length,news=valid-updates;
-    el.importCount.textContent=`${valid}件`;el.importSummaryText.textContent=`更新 ${updates} / 新規 ${news}`;
-    el.importActionBar.classList.remove("hidden");el.saveImportButton.disabled=!valid||!state.importGuild;
+    const active=state.importRows.filter(r=>!r.deleted);
+    const valid=active.filter(validImportRow).length;
+    const updates=active.filter(r=>validImportRow(r)&&r.status==="update").length;
+    const news=active.filter(r=>validImportRow(r)&&r.status==="new").length;
+    const dels=state.importRows.filter(r=>r.deleted).length;
+    el.importCount.textContent=`${active.length}件`;
+    el.importSummaryText.textContent=state.editorDirty?`変更あり｜更新 ${updates} / 新規 ${news} / 削除 ${dels}`:`変更なし｜登録 ${active.length}件`;
+    el.importActionBar.classList.remove("hidden");
+    el.saveImportButton.disabled=!state.editorDirty||!state.importGuild;
   }
 
   function onImportRowEdit(e){
     const rowEl=e.target.closest("[data-import-index]");if(!rowEl)return;
-    const i=Number(rowEl.dataset.importIndex),row=state.importRows[i];if(!row)return;
-    if(e.target.dataset.importKey==="playerName")row.playerName=e.target.value;
-    if(e.target.dataset.entryKey){
+    const i=Number(rowEl.dataset.importIndex),row=state.importRows[i];if(!row||row.deleted)return;
+    if(e.target.dataset.importKey==="playerName"){
+      row.playerName=e.target.value;
+    }else{
       const j=Number(e.target.dataset.entryIndex),key=e.target.dataset.entryKey;
-      row.entries[j][key]=key==="power"?(e.target.value===""?"":Math.max(0,Number(e.target.value)||0)):e.target.value;
+      if(!Number.isInteger(j)||!row.entries[j]||!key)return;
+      row.entries[j][key]=e.target.value;
     }
-    refreshImportStatuses();renderImportRows();
+    row.aiUpdated=false;
+    state.editorDirty=true;
+    refreshImportStatuses();
+    renderImportRows();
   }
 
   function validImportRow(r){
@@ -512,29 +553,39 @@
   }
 
   async function saveImportedRows(){
-    const rows=state.importRows.filter(validImportRow).map(r=>({
+    if(!state.importGuild||!state.editorDirty)return;
+    const rows=state.importRows.filter(r=>!r.deleted&&validImportRow(r)).map(r=>({
       playerName:r.playerName.trim(),
       entries:r.entries.filter(e=>Number(e.power)>0).slice(0,3).map(e=>({attribute:e.attribute,power:Number(e.power)}))
     }));
-    if(!rows.length||!state.importGuild)return;
-    if(!confirm(`${state.importGuild} に ${rows.length}人分の戦力を反映します。よろしいですか？`))return;
-    el.saveImportButton.disabled=true;el.saveImportButton.textContent="反映中…";
+    const deletePlayers=state.importRows.filter(r=>r.deleted&&r.status!=="new").map(r=>r.playerName.trim()).filter(Boolean);
+    if(!confirm(`${state.importGuild} の変更を保存します。\n登録/更新 ${rows.length}人・削除 ${deletePlayers.length}人\nよろしいですか？`))return;
+    el.saveImportButton.disabled=true;el.saveImportButton.textContent="保存中…";
     try{
-      const payload=encodeURIComponent(JSON.stringify(rows));
-      const res=await jsonp({action:"savePowerImport",guild:state.importGuild,payload},60000);
+      const payload=encodeURIComponent(JSON.stringify({rows,deletePlayers}));
+      const res=await jsonp({action:"saveGuildEditor",guild:state.importGuild,payload},60000);
       if(!res?.ok)throw new Error(res?.error||"保存失敗");
-      showToast(`更新 ${res.updated||0} / 新規 ${res.created||0} を反映しました`);
-      state.importRows=[];await loadGuildRoster(false);await loadFull(false);renderImportRows();
+      showToast(`保存完了：更新 ${res.updated||0} / 新規 ${res.created||0} / 削除 ${res.deleted||0}`);
+      await loadGuildRoster(false);await loadFull(false);
     }catch(err){console.error(err);showToast(err.message,true)}
-    finally{el.saveImportButton.disabled=false;el.saveImportButton.textContent="スプレッドシートへ反映"}
+    finally{el.saveImportButton.disabled=false;el.saveImportButton.textContent="変更をまとめて保存"}
   }
 
   async function loadGuildRoster(showError=true){
-    if(!state.importGuild){state.guildRoster=[];return}
+    if(!state.importGuild){
+      state.guildRoster=[];state.guildRosterOriginal=[];state.importRows=[];state.editorDirty=false;renderImportRows();return;
+    }
     try{
       const res=await jsonp({action:"guildRoster",guild:state.importGuild,t:Date.now()},20000);
       if(!res?.ok)throw new Error(res?.error||"ギルドデータ取得失敗");
-      state.guildRoster=res.rows||[];refreshImportStatuses();
+      state.guildRoster=res.rows||[];
+      state.guildRosterOriginal=JSON.parse(JSON.stringify(state.guildRoster));
+      state.importRows=state.guildRoster.map(r=>({
+        id:cryptoId(),playerName:r.playerName||"",
+        entries:(r.entries||[]).slice(0,3).map(e=>({attribute:e.attribute||"",power:e.power??"",rawText:"",confidence:1})),
+        source:"既存データ",status:"update",notes:"",aiUpdated:false,deleted:false
+      }));
+      state.editorDirty=false;refreshImportStatuses();renderImportRows();
     }catch(err){if(showError)showToast(err.message,true)}
   }
 
@@ -545,7 +596,7 @@
       const res=await jsonp({action:"createGuild",name},30000);
       if(!res?.ok)throw new Error(res?.error||"作成失敗");
       el.newGuildDialog.close();showToast(`${name} を作成しました`);
-      state.importGuild=name;await loadFull(false);renderImportGuildOptions();el.importGuild.value=name;await loadGuildRoster(false);
+      state.importGuild=name;await loadFull(false);renderImportGuildOptions();el.importGuild.value=name;await loadGuildRoster(false);showToast(`${name} を作成し、プルダウン用K列にも登録しました`);
     }catch(err){showToast(err.message,true)}
   }
 

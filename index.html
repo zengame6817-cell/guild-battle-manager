@@ -47,7 +47,7 @@
       <button class="tab active" data-tab="members" type="button"><span>👥</span>メンバー</button>
       <button class="tab" data-tab="battle" type="button"><span>⚔</span>戦力比較</button>
       <button class="tab" data-tab="enemies" type="button"><span>📍</span>相手配置</button>
-      <button class="tab" data-tab="import" type="button"><span>📷</span>戦力取込</button>
+      <button class="tab" data-tab="import" type="button"><span>📷</span>戦力編集</button>
     </nav>
 
     <section id="membersPanel" class="panel active"></section>
@@ -68,7 +68,7 @@
         <div class="upload-copy">
           <div class="upload-icon">📷</div>
           <div>
-            <strong>東京ディバンカーのスクショを追加</strong>
+            <strong>スクショで戦力を更新</strong>
             <p>複数枚OK。スマホの写真アプリからそのまま選べます。</p>
           </div>
         </div>
@@ -82,7 +82,7 @@
 
       <div class="import-head">
         <div>
-          <h2>解析結果</h2>
+          <h2>ギルド戦力</h2>
           <p id="importHint">画像を選ぶと、名前・属性・戦力上位3件を読み取ります。</p><p id="aiServiceStatus" class="service-status">AI接続状態を確認中…</p>
         </div>
         <div class="import-head-actions">
@@ -104,7 +104,8 @@
           <strong id="importCount">0件</strong>
           <span id="importSummaryText">登録準備中</span>
         </div>
-        <button id="saveImportButton" class="button primary" type="button">スプレッドシートへ反映</button>
+        <button id="discardImportButton" class="secondary" type="button">変更を破棄</button>
+          <button id="saveImportButton" class="button primary" type="button">変更をまとめて保存</button>
       </div>
     </section>
   </main>
