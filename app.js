@@ -2,6 +2,7 @@
   "use strict";
 
   const cfg = window.APP_CONFIG;
+  document.title = `ギルド対戦管理 v${cfg.VERSION}`;
   const state = {
     mode: localStorage.getItem("gbm-mode") || cfg.DEFAULT_MODE,
     tab: localStorage.getItem("gbm-tab") || "members",
@@ -22,7 +23,7 @@
 
   const $ = id => document.getElementById(id);
   const el = {
-    status: $("connectionStatus"), mode: $("modeSelect"), refresh: $("refreshButton"), theme: $("themeButton"),
+    status: $("connectionStatus"), versionLabel: $("versionLabel"), aiServiceStatus: $("aiServiceStatus"), mode: $("modeSelect"), refresh: $("refreshButton"), theme: $("themeButton"),
     battleControls: $("battleControls"), guilds: $("guildSelectors"), search: $("searchInput"), filter: $("statusFilter"),
     summary: $("summary"), members: $("membersPanel"), battle: $("battlePanel"), enemies: $("enemiesPanel"), importPanel: $("importPanel"),
     importGuild: $("importGuild"), newGuildButton: $("newGuildButton"), guildDataButton: $("guildDataButton"),
@@ -35,6 +36,7 @@
   };
 
   function init() {
+    if (el.versionLabel) el.versionLabel.textContent = `v${cfg.VERSION}`;
     applyTheme(state.theme);
     el.mode.value = state.mode;
     setTab(state.tab);
@@ -43,7 +45,8 @@
       state.mode = el.mode.value;
       localStorage.setItem("gbm-mode", state.mode);
       state.version = null;
-      await loadFull(true);
+      await checkAiService();
+    loadFull(true);
     });
     el.refresh.addEventListener("click", () => loadFull(true));
     el.theme.addEventListener("click", cycleTheme);
@@ -147,27 +150,20 @@
 
   async function analyzeImageViaJob(imageData, filename) {
     const jobId = cryptoId();
-    const payload = {
+
+    // fetch() を完全に使わず、通常のHTMLフォームPOSTで送信する。
+    // cross-origin の Apps Script Web App でも、hidden iframe 宛ての
+    // form submit ならCORSの影響を受けずに画像を送れる。
+    submitImageJobForm({
       action: "analyzeImageJob",
       jobId,
       imageData,
       filename
-    };
-
-    // Apps Script Web Appへのcross-origin POSTはレスポンス読取で
-    // "Failed to fetch" になることがあるため、no-corsで投げて
-    // 結果はJSONP(GET)で別取得する。
-    fetch(cfg.API_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-      redirect: "follow",
-      keepalive: false
-    }).catch(err => console.warn("analysis submit:", err));
+    });
 
     const started = Date.now();
     const timeoutMs = cfg.IMAGE_ANALYZE_TIMEOUT_MS || 90000;
+    let lastStage = "";
 
     while (Date.now() - started < timeoutMs) {
       await sleep(1400);
@@ -177,11 +173,91 @@
       );
 
       if (!res?.ok) throw new Error(res?.error || "画像解析結果の取得に失敗しました。");
+
+      if (res.stage && res.stage !== lastStage) {
+        lastStage = res.stage;
+        setActiveImageStatus(filename, stageLabel(res.stage));
+      }
+
       if (res.status === "done") return res.data;
       if (res.status === "error") throw new Error(res.error || "画像解析に失敗しました。");
     }
 
     throw new Error("画像解析がタイムアウトしました。");
+  }
+
+  function submitImageJobForm(fields) {
+    const iframeName = `gbm_upload_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.style.display = "none";
+    iframe.setAttribute("aria-hidden", "true");
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = cfg.API_URL;
+    form.target = iframeName;
+    form.enctype = "application/x-www-form-urlencoded";
+    form.acceptCharset = "UTF-8";
+    form.style.display = "none";
+
+    Object.entries(fields).forEach(([key, value]) => {
+      const input = document.createElement("textarea");
+      input.name = key;
+      input.value = String(value ?? "");
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(iframe);
+    document.body.appendChild(form);
+    form.submit();
+
+    setTimeout(() => {
+      form.remove();
+      iframe.remove();
+    }, 120000);
+  }
+
+  function setActiveImageStatus(filename, text) {
+    const target = state.importFiles.find(f => f.name === filename && f.status !== "完了");
+    if (target) {
+      target.status = text;
+      renderImageQueue();
+    }
+  }
+
+  function stageLabel(stage) {
+    const map = {
+      submitted: "送信中",
+      received: "GAS受信",
+      validating: "画像確認",
+      ai: "AI解析中",
+      parsing: "結果整形",
+      done: "完了"
+    };
+    return map[stage] || stage;
+  }
+
+  async function checkAiService() {
+    if (!el.aiServiceStatus) return;
+    try {
+      const res = await jsonp(
+        { action: "aiStatus", t: Date.now() },
+        cfg.VERSION_REQUEST_TIMEOUT_MS || 12000
+      );
+      if (!res?.ok) throw new Error(res?.error || "状態取得失敗");
+      if (res.configured) {
+        el.aiServiceStatus.className = "service-status ok";
+        el.aiServiceStatus.textContent = `AI接続: 準備OK / ${res.model}`;
+      } else {
+        el.aiServiceStatus.className = "service-status error";
+        el.aiServiceStatus.textContent = "AI接続: APIキー未設定";
+      }
+    } catch (err) {
+      el.aiServiceStatus.className = "service-status warn";
+      el.aiServiceStatus.textContent = "AI接続: 状態確認できません";
+    }
   }
 
   function sleep(ms) {
@@ -350,7 +426,7 @@
     state.analyzing=true;el.analyzeButton.disabled=true;el.imageInput.disabled=true;
     try{
       for(let i=0;i<targets.length;i++){
-        const f=targets[i];f.status=`解析 ${i+1}/${targets.length}`;renderImageQueue();
+        const f=targets[i];f.status="送信中";renderImageQueue();
         try{
           const parsed=await analyzeImageViaJob(f.dataUrl,f.name);
           addImportRow(parsed,f.name,false);

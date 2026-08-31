@@ -117,3 +117,8 @@ table{width:100%;border-collapse:collapse}.data-table{min-width:1070px}
   .player-input{min-height:42px;font-size:16px}.import-action-bar{bottom:4px}.import-action-bar .button{min-height:44px}
   .roster-row{grid-template-columns:minmax(100px,1fr) auto}.roster-powers{grid-column:1/-1;grid-row:2}.danger-actions{display:grid}.danger-actions .button{width:100%}
 }
+
+.service-status{margin:3px 0 0;font-size:10px;color:var(--muted);font-weight:700}
+.service-status.ok{color:var(--green)}
+.service-status.warn{color:var(--amber)}
+.service-status.error{color:var(--red)}
