@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0b1220">
   <title>ギルド対戦管理</title>
-  <link rel="stylesheet" href="style-v2.2.18.css?v=2218">
+  <link rel="stylesheet" href="style-v2.2.19.css?v=2219">
 </head>
 <body>
   <header class="topbar">
@@ -16,6 +16,7 @@
         <span>Manager <b id="versionLabel"></b></span>
       </div>
       <span id="connectionStatus" class="status loading">接続中</span>
+      <span id="firebaseStatus" class="status loading">点呼接続中</span>
     </div>
 
     <div class="top-actions">
@@ -165,8 +166,8 @@
     }
   });
 </script>
-<script src="config-v2.2.18.js?v=2218" onerror="document.getElementById('connectionStatus').textContent='設定読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
-  <script type="module" src="firebase-attendance-v2.2.18.js?v=2218"></script>
-  <script src="app-v2.2.18.js?v=2218" onerror="document.getElementById('connectionStatus').textContent='アプリ読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
+<script src="config-v2.2.19.js?v=2219" onerror="document.getElementById('connectionStatus').textContent='設定読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
+  <script type="module" src="firebase-attendance-v2.2.19.js?v=2219"></script>
+  <script src="app-v2.2.19.js?v=2219" onerror="document.getElementById('connectionStatus').textContent='アプリ読込エラー';document.getElementById('connectionStatus').className='status error'"></script>
 </body>
 </html>
